@@ -77,7 +77,8 @@ func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
 }
 
 func (lf *ListFile) Close() error {
-	// TODO: lock the mutex?
+	lf.mu.Lock()
+	defer lf.mu.Unlock()
 
 	err := lf.file.Sync()
 	if err != nil {
