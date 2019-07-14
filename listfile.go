@@ -48,6 +48,15 @@ func (lf *ListFile) LenInt64() int64 {
 	return int64(lf.Len())
 }
 
+func (lf *ListFile) LenLines() int {
+	var count int
+	lf.IterateLines(func(line string) bool {
+		count++
+		return true
+	})
+	return count
+}
+
 // IterateLines iterates on the lines of the list;
 // this operation is LOCKING.
 func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
