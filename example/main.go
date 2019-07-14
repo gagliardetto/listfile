@@ -26,7 +26,9 @@ func main() {
 			}
 		}()
 	}
+
 	time.Sleep(time.Second)
+
 	lst.IterateLines(func(line string) bool {
 		fmt.Println(line)
 		return true

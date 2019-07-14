@@ -13,7 +13,7 @@ type ListFile struct {
 	mu   *sync.RWMutex
 }
 
-// Append appends one or more strings adding a newline to each
+// Append appends one or more strings adding a newline to each.
 func (lf *ListFile) Append(items ...string) error {
 	lf.mu.Lock()
 	defer lf.mu.Unlock()
@@ -27,6 +27,8 @@ func (lf *ListFile) Append(items ...string) error {
 	return nil
 }
 
+// Len returns the length in bytes of the file;
+// WARNING: this operation does not lock the mutex.
 func (lf *ListFile) Len() int {
 	err := lf.file.Sync()
 	if err != nil {
@@ -35,7 +37,6 @@ func (lf *ListFile) Len() int {
 	}
 
 	info, err := lf.file.Stat()
-	// TODO: consider error?
 	if err != nil {
 		// TODO: not panic??
 		panic(err)
@@ -47,10 +48,12 @@ func (lf *ListFile) LenInt64() int64 {
 	return int64(lf.Len())
 }
 
-// IterateLines iterates on the lines of the list
+// IterateLines iterates on the lines of the list;
+// this operation is LOCKING.
 func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
-	lf.mu.Lock()
-	defer lf.mu.Unlock()
+	// TODO: use a Lock() ar a RLock() ???
+	lf.mu.RLock()
+	defer lf.mu.RUnlock()
 
 	sectionReader := io.NewSectionReader(lf.file, 0, lf.LenInt64())
 
@@ -74,6 +77,8 @@ func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
 }
 
 func (lf *ListFile) Close() error {
+	// TODO: lock the mutex?
+
 	err := lf.file.Sync()
 	if err != nil {
 		return err
