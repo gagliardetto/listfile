@@ -2,6 +2,7 @@ package listfile
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,12 +10,17 @@ import (
 )
 
 type ListFile struct {
-	file *os.File
-	mu   *sync.RWMutex
+	file     *os.File
+	mu       *sync.RWMutex
+	isClosed bool
 }
 
 // Append appends one or more strings adding a newline to each.
 func (lf *ListFile) Append(items ...string) error {
+	if lf.IsClosed() {
+		return errors.New("file is already closed")
+	}
+
 	lf.mu.Lock()
 	defer lf.mu.Unlock()
 
@@ -27,9 +33,21 @@ func (lf *ListFile) Append(items ...string) error {
 	return nil
 }
 
+func (lf *ListFile) IsClosed() bool {
+	lf.mu.RLock()
+	defer lf.mu.RUnlock()
+	// if the file is already closed, any operation on it
+	// will panic.
+	return lf.isClosed
+}
+
 // Len returns the length in bytes of the file;
 // WARNING: this operation does not lock the mutex.
 func (lf *ListFile) Len() int {
+	if lf.IsClosed() {
+		return 0
+	}
+
 	err := lf.file.Sync()
 	if err != nil {
 		// TODO: not panic??
@@ -49,6 +67,10 @@ func (lf *ListFile) LenInt64() int64 {
 }
 
 func (lf *ListFile) LenLines() int {
+	if lf.IsClosed() {
+		return 0
+	}
+
 	var count int
 	lf.IterateLines(func(line string) bool {
 		count++
@@ -60,6 +82,10 @@ func (lf *ListFile) LenLines() int {
 // IterateLines iterates on the lines of the list;
 // this operation is LOCKING.
 func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
+	if lf.IsClosed() {
+		return errors.New("file is already closed")
+	}
+
 	// TODO: use a Lock() ar a RLock() ???
 	lf.mu.RLock()
 	defer lf.mu.RUnlock()
@@ -86,6 +112,10 @@ func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
 }
 
 func (lf *ListFile) Close() error {
+	if lf.IsClosed() {
+		return nil
+	}
+
 	lf.mu.Lock()
 	defer lf.mu.Unlock()
 
@@ -98,6 +128,8 @@ func (lf *ListFile) Close() error {
 	if err != nil {
 		return err
 	}
+
+	lf.isClosed = true
 
 	return nil
 }
