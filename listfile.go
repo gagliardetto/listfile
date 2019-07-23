@@ -45,21 +45,25 @@ func (lf *ListFile) UniqueAppend(items ...string) (int, error) {
 
 	var successfullyAdded int
 	for _, item := range items {
-		if lf.noMutexHasStringLine(item) {
+		has, err := lf.noMutexHasStringLine(item)
+		if err != nil {
+			return successfullyAdded, err
+		}
+		if has {
 			continue
 		}
-		_, err := lf.file.WriteString(item + "\n")
+		_, err = lf.file.WriteString(item + "\n")
 		if err != nil {
-			return err
+			return successfullyAdded, err
 		}
 		successfullyAdded++
 	}
 	return successfullyAdded, nil
 }
 
-func (lf *ListFile) HasStringLine(s string) bool {
+func (lf *ListFile) HasStringLine(s string) (bool, error) {
 	if lf.IsClosed() {
-		return errors.New("file is already closed")
+		return false, errors.New("file is already closed")
 	}
 	// TODO: use a Lock() ar a RLock() ???
 	lf.mu.RLock()
@@ -68,7 +72,7 @@ func (lf *ListFile) HasStringLine(s string) bool {
 	return lf.noMutexHasStringLine(s)
 }
 
-func (lf *ListFile) noMutexHasStringLine(s string) bool {
+func (lf *ListFile) noMutexHasStringLine(s string) (bool, error) {
 	var has bool
 	err := lf.noMutexIterateLines(textScanner(func(line string) bool {
 		if s == line {
@@ -78,14 +82,13 @@ func (lf *ListFile) noMutexHasStringLine(s string) bool {
 		return true
 	}))
 	if err != nil {
-		// TODO: return an error?
-		panic(err)
+		return false, err
 	}
-	return has
+	return has, nil
 }
-func (lf *ListFile) HasBytesLine(b []byte) bool {
+func (lf *ListFile) HasBytesLine(b []byte) (bool, error) {
 	if lf.IsClosed() {
-		return errors.New("file is already closed")
+		return false, errors.New("file is already closed")
 	}
 	// TODO: use a Lock() ar a RLock() ???
 	lf.mu.RLock()
@@ -93,8 +96,9 @@ func (lf *ListFile) HasBytesLine(b []byte) bool {
 
 	return lf.noMutexHasBytesLine(b)
 }
-func (lf *ListFile) noMutexHasBytesLine(b []byte) bool {
-	err := lf.noMutexIterateLines(textScanner(func(line string) bool {
+func (lf *ListFile) noMutexHasBytesLine(b []byte) (bool, error) {
+	var has bool
+	err := lf.noMutexIterateLines(bytesScanner(func(line []byte) bool {
 		if bytes.Equal(b, line) {
 			has = true
 			return false
@@ -102,10 +106,9 @@ func (lf *ListFile) noMutexHasBytesLine(b []byte) bool {
 		return true
 	}))
 	if err != nil {
-		// TODO: return an error?
-		panic(err)
+		return false, err
 	}
-	return has
+	return has, nil
 }
 
 func (lf *ListFile) IsClosed() bool {
