@@ -2,6 +2,7 @@ package listfile
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,80 @@ func (lf *ListFile) Append(items ...string) error {
 		}
 	}
 	return nil
+}
+
+// Append appends one or more strings adding a newline to each.
+func (lf *ListFile) UniqueAppend(items ...string) (int, error) {
+	if lf.IsClosed() {
+		return 0, errors.New("file is already closed")
+	}
+
+	lf.mu.Lock()
+	defer lf.mu.Unlock()
+
+	var successfullyAdded int
+	for _, item := range items {
+		if lf.noMutexHasStringLine(item) {
+			continue
+		}
+		_, err := lf.file.WriteString(item + "\n")
+		if err != nil {
+			return err
+		}
+		successfullyAdded++
+	}
+	return successfullyAdded, nil
+}
+
+func (lf *ListFile) HasStringLine(s string) bool {
+	if lf.IsClosed() {
+		return errors.New("file is already closed")
+	}
+	// TODO: use a Lock() ar a RLock() ???
+	lf.mu.RLock()
+	defer lf.mu.RUnlock()
+
+	return lf.noMutexHasStringLine(s)
+}
+
+func (lf *ListFile) noMutexHasStringLine(s string) bool {
+	var has bool
+	err := lf.noMutexIterateLines(textScanner(func(line string) bool {
+		if s == line {
+			has = true
+			return false
+		}
+		return true
+	}))
+	if err != nil {
+		// TODO: return an error?
+		panic(err)
+	}
+	return has
+}
+func (lf *ListFile) HasBytesLine(b []byte) bool {
+	if lf.IsClosed() {
+		return errors.New("file is already closed")
+	}
+	// TODO: use a Lock() ar a RLock() ???
+	lf.mu.RLock()
+	defer lf.mu.RUnlock()
+
+	return lf.noMutexHasBytesLine(b)
+}
+func (lf *ListFile) noMutexHasBytesLine(b []byte) bool {
+	err := lf.noMutexIterateLines(textScanner(func(line string) bool {
+		if bytes.Equal(b, line) {
+			has = true
+			return false
+		}
+		return true
+	}))
+	if err != nil {
+		// TODO: return an error?
+		panic(err)
+	}
+	return has
 }
 
 func (lf *ListFile) IsClosed() bool {
@@ -106,6 +181,11 @@ func (lf *ListFile) iterateLines(iterator func(scanner *bufio.Scanner) bool) err
 	lf.mu.RLock()
 	defer lf.mu.RUnlock()
 
+	return lf.noMutexIterateLines(iterator)
+}
+
+func (lf *ListFile) noMutexIterateLines(iterator func(scanner *bufio.Scanner) bool) error {
+
 	sectionReader := io.NewSectionReader(lf.file, 0, lf.LenInt64())
 
 	scanner := bufio.NewScanner(sectionReader)
@@ -126,7 +206,6 @@ func (lf *ListFile) iterateLines(iterator func(scanner *bufio.Scanner) bool) err
 
 	return nil
 }
-
 func (lf *ListFile) Close() error {
 	if lf.IsClosed() {
 		return nil
