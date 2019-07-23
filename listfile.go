@@ -82,6 +82,22 @@ func (lf *ListFile) LenLines() int {
 // IterateLines iterates on the lines of the list;
 // this operation is LOCKING.
 func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
+	return lf.iterateLines(textScanner(iterator))
+}
+func (lf *ListFile) IterateLinesAsBytes(iterator func(line []byte) bool) error {
+	return lf.iterateLines(bytesScanner(iterator))
+}
+func textScanner(iterator func(line string) bool) func(scanner *bufio.Scanner) bool {
+	return func(scanner *bufio.Scanner) bool {
+		return iterator(scanner.Text())
+	}
+}
+func bytesScanner(iterator func(line []byte) bool) func(scanner *bufio.Scanner) bool {
+	return func(scanner *bufio.Scanner) bool {
+		return iterator(scanner.Bytes())
+	}
+}
+func (lf *ListFile) iterateLines(iterator func(scanner *bufio.Scanner) bool) error {
 	if lf.IsClosed() {
 		return errors.New("file is already closed")
 	}
@@ -94,7 +110,7 @@ func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
 
 	scanner := bufio.NewScanner(sectionReader)
 	for scanner.Scan() {
-		doContinue := iterator(scanner.Text())
+		doContinue := iterator(scanner)
 		if !doContinue {
 			return nil
 		}
