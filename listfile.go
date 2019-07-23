@@ -122,7 +122,11 @@ func (lf *ListFile) IsClosed() bool {
 // Len returns the length in bytes of the file;
 // WARNING: this operation does not lock the mutex.
 func (lf *ListFile) Len() int {
-	if lf.IsClosed() {
+	// NOTE: here we don't use IsClosed() because
+	// it uses the mutex; Len() is used in noMutexIterateLines
+	// which is called after another mutex is locked,
+	// making IsClosed() wait forever for the mutex unlock.
+	if lf.isClosed {
 		return 0
 	}
 
