@@ -40,6 +40,27 @@ func (lf *ListFile) Append(items ...string) error {
 }
 
 // Append appends one or more strings adding a newline to each.
+func (lf *ListFile) AppendBytes(items ...[]byte) error {
+	if lf.IsClosed() {
+		return errors.New("file is already closed")
+	}
+
+	lf.mu.Lock()
+	defer lf.mu.Unlock()
+
+	for _, item := range items {
+		_, err := lf.file.Write(append(item, []byte("\n")...))
+		if err != nil {
+			return err
+		}
+		// add to tree to be able then to search it:
+		// TODO: use InsertNoReplace instead?
+		lf.tree.ReplaceOrInsert(Item(item))
+	}
+	return nil
+}
+
+// Append appends one or more strings adding a newline to each.
 func (lf *ListFile) UniqueAppend(items ...string) (int, error) {
 	if lf.IsClosed() {
 		return 0, errors.New("file is already closed")
