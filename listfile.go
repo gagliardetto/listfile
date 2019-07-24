@@ -2,18 +2,20 @@ package listfile
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sync"
+
+	"github.com/petar/GoLLRB/llrb"
 )
 
 type ListFile struct {
 	file     *os.File
 	mu       *sync.RWMutex
 	isClosed bool
+	tree     *llrb.LLRB
 }
 
 // Append appends one or more strings adding a newline to each.
@@ -30,6 +32,9 @@ func (lf *ListFile) Append(items ...string) error {
 		if err != nil {
 			return err
 		}
+		// add to tree to be able then to search it:
+		// TODO: use InsertNoReplace instead?
+		lf.tree.ReplaceOrInsert(Item(item))
 	}
 	return nil
 }
@@ -43,22 +48,21 @@ func (lf *ListFile) UniqueAppend(items ...string) (int, error) {
 	lf.mu.Lock()
 	defer lf.mu.Unlock()
 
-	var successfullyAdded int
+	var successfullyAddedItemsCount int
 	for _, item := range items {
-		has, err := lf.noMutexHasStringLine(item)
-		if err != nil {
-			return successfullyAdded, err
-		}
+		has := lf.noMutexHasStringLine(item)
 		if has {
 			continue
 		}
-		_, err = lf.file.WriteString(item + "\n")
+		_, err := lf.file.WriteString(item + "\n")
 		if err != nil {
-			return successfullyAdded, err
+			return successfullyAddedItemsCount, err
 		}
-		successfullyAdded++
+		// add to tree to be able then to search it:
+		lf.tree.ReplaceOrInsert(Item(item))
+		successfullyAddedItemsCount++
 	}
-	return successfullyAdded, nil
+	return successfullyAddedItemsCount, nil
 }
 
 func (lf *ListFile) HasStringLine(s string) (bool, error) {
@@ -69,22 +73,11 @@ func (lf *ListFile) HasStringLine(s string) (bool, error) {
 	lf.mu.RLock()
 	defer lf.mu.RUnlock()
 
-	return lf.noMutexHasStringLine(s)
+	return lf.noMutexHasStringLine(s), nil
 }
 
-func (lf *ListFile) noMutexHasStringLine(s string) (bool, error) {
-	var has bool
-	err := lf.noMutexIterateLines(textScanner(func(line string) bool {
-		if s == line {
-			has = true
-			return false
-		}
-		return true
-	}))
-	if err != nil {
-		return false, err
-	}
-	return has, nil
+func (lf *ListFile) noMutexHasStringLine(s string) bool {
+	return lf.tree.Has(Item(s))
 }
 func (lf *ListFile) HasBytesLine(b []byte) (bool, error) {
 	if lf.IsClosed() {
@@ -94,21 +87,10 @@ func (lf *ListFile) HasBytesLine(b []byte) (bool, error) {
 	lf.mu.RLock()
 	defer lf.mu.RUnlock()
 
-	return lf.noMutexHasBytesLine(b)
+	return lf.noMutexHasBytesLine(b), nil
 }
-func (lf *ListFile) noMutexHasBytesLine(b []byte) (bool, error) {
-	var has bool
-	err := lf.noMutexIterateLines(bytesScanner(func(line []byte) bool {
-		if bytes.Equal(b, line) {
-			has = true
-			return false
-		}
-		return true
-	}))
-	if err != nil {
-		return false, err
-	}
-	return has, nil
+func (lf *ListFile) noMutexHasBytesLine(b []byte) bool {
+	return lf.noMutexHasStringLine(string(b))
 }
 
 func (lf *ListFile) IsClosed() bool {
@@ -245,7 +227,29 @@ func New(filepath string) (*ListFile, error) {
 	lf := &ListFile{
 		file: file,
 		mu:   &sync.RWMutex{},
+		tree: llrb.New(),
+	}
+
+	err = lf.loadExistingToTree()
+	if err != nil {
+		return nil, fmt.Errorf("error while loadExistingToTree: %s", err)
 	}
 
 	return lf, nil
+}
+func (lf *ListFile) loadExistingToTree() error {
+	if lf.IsClosed() {
+		return errors.New("file is already closed")
+	}
+
+	return lf.IterateLines(func(line string) bool {
+		lf.tree.ReplaceOrInsert(Item(line))
+		return true
+	})
+}
+
+type Item string
+
+func (oid Item) Less(than llrb.Item) bool {
+	return oid < than.(Item)
 }
