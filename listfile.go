@@ -16,9 +16,62 @@ type ListFile struct {
 	mu       *sync.RWMutex
 	isClosed bool
 	tree     *llrb.LLRB
+	indexes  map[string]*Index
 }
 
-// Append appends one or more strings adding a newline to each.
+type Index struct {
+	tree            *llrb.LLRB
+	backfillIndexer func(line []byte) bool
+}
+
+// HasIntByIndex checks whether the index contains a specific value.
+func (lf *ListFile) HasIntByIndex(indexName string, v int) bool {
+	lf.mu.RLock()
+	defer lf.mu.RUnlock()
+	index, ok := lf.indexes[indexName]
+	if !ok {
+		// TODO: if the index does not exist, return error, or create it, or just return false?
+		return false
+	}
+	return index.tree.Has(ItemInt(v))
+}
+
+func newBackfillIndexerInt(index *Index, intColGetter func(item []byte) int) func(line []byte) bool {
+	return func(line []byte) bool {
+		colVal := intColGetter(line)
+		index.tree.ReplaceOrInsert(ItemInt(colVal))
+		return true
+	}
+}
+
+// CreateIndexOnInt creates a new index (tree) using the int value returned by the intColGetter
+// When the index is created,  a backfill is executed on all exisitng lines in the listfile.
+// If the index already exists, nothing is done.
+func (lf *ListFile) CreateIndexOnInt(indexName string, intColGetter func(item []byte) int) error {
+	lf.mu.Lock()
+	defer lf.mu.Unlock()
+	// TODO:
+	// - check if index exists
+	// - if not, create and iterate over all items
+	_, ok := lf.indexes[indexName]
+	if !ok {
+
+		// stub index:
+		lf.indexes[indexName] = &Index{
+			tree: llrb.New(),
+		}
+		// create func that will add items to index during appends:
+		backfillIndexer := newBackfillIndexerInt(lf.indexes[indexName], intColGetter)
+		lf.indexes[indexName].backfillIndexer = backfillIndexer
+
+		// do the backfill for all current items in the list:
+		lf.noMutexIterateLines(bytesScanner(backfillIndexer))
+	}
+
+	return nil
+}
+
+// Append appends one or more strings adding a final newline to each.
 func (lf *ListFile) Append(items ...string) error {
 	if lf.IsClosed() {
 		return errors.New("file is already closed")
@@ -35,6 +88,11 @@ func (lf *ListFile) Append(items ...string) error {
 		// add to tree to be able then to search it:
 		// TODO: use InsertNoReplace instead?
 		lf.tree.ReplaceOrInsert(Item(item))
+
+		// add to all indexes:
+		for _, index := range lf.indexes {
+			index.backfillIndexer([]byte(item))
+		}
 	}
 	return nil
 }
@@ -56,6 +114,11 @@ func (lf *ListFile) AppendBytes(items ...[]byte) error {
 		// add to tree to be able then to search it:
 		// TODO: use InsertNoReplace instead?
 		lf.tree.ReplaceOrInsert(Item(item))
+
+		// add to all indexes:
+		for _, index := range lf.indexes {
+			index.backfillIndexer(item)
+		}
 	}
 	return nil
 }
@@ -82,6 +145,11 @@ func (lf *ListFile) UniqueAppend(items ...string) (int, error) {
 		// add to tree to be able then to search it:
 		lf.tree.ReplaceOrInsert(Item(item))
 		successfullyAddedItemsCount++
+
+		// add to all indexes:
+		for _, index := range lf.indexes {
+			index.backfillIndexer([]byte(item))
+		}
 	}
 	return successfullyAddedItemsCount, nil
 }
@@ -246,9 +314,10 @@ func New(filepath string) (*ListFile, error) {
 	}
 
 	lf := &ListFile{
-		file: file,
-		mu:   &sync.RWMutex{},
-		tree: llrb.New(),
+		file:    file,
+		mu:      &sync.RWMutex{},
+		tree:    llrb.New(),
+		indexes: make(map[string]*Index),
 	}
 
 	err = lf.loadExistingToTree()
@@ -273,4 +342,10 @@ type Item string
 
 func (oid Item) Less(than llrb.Item) bool {
 	return oid < than.(Item)
+}
+
+type ItemInt int
+
+func (oid ItemInt) Less(than llrb.Item) bool {
+	return oid < than.(ItemInt)
 }
