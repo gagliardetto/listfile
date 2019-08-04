@@ -134,7 +134,7 @@ func (lf *ListFile) UniqueAppend(items ...string) (int, error) {
 
 	var successfullyAddedItemsCount int
 	for _, item := range items {
-		has := lf.noMutexHasStringLine(item)
+		has := lf.NoMutexHasStringLine(item)
 		if has {
 			continue
 		}
@@ -160,13 +160,13 @@ func (lf *ListFile) HasStringLine(s string) (bool, error) {
 	//}
 	// TODO: use a Lock() ar a RLock() ???
 	lf.mu.RLock()
-	has := lf.noMutexHasStringLine(s)
+	has := lf.NoMutexHasStringLine(s)
 	lf.mu.RUnlock()
 
 	return has, nil
 }
 
-func (lf *ListFile) noMutexHasStringLine(s string) bool {
+func (lf *ListFile) NoMutexHasStringLine(s string) bool {
 	return lf.tree.Has(Item(s))
 }
 func (lf *ListFile) HasBytesLine(b []byte) (bool, error) {
@@ -181,7 +181,7 @@ func (lf *ListFile) HasBytesLine(b []byte) (bool, error) {
 	return has, nil
 }
 func (lf *ListFile) noMutexHasBytesLine(b []byte) bool {
-	return lf.noMutexHasStringLine(string(b))
+	return lf.NoMutexHasStringLine(string(b))
 }
 
 func (lf *ListFile) IsClosed() bool {
