@@ -155,28 +155,30 @@ func (lf *ListFile) UniqueAppend(items ...string) (int, error) {
 }
 
 func (lf *ListFile) HasStringLine(s string) (bool, error) {
-	if lf.IsClosed() {
-		return false, errors.New("file is already closed")
-	}
+	//if lf.IsClosed() {
+	//	return false, errors.New("file is already closed")
+	//}
 	// TODO: use a Lock() ar a RLock() ???
 	lf.mu.RLock()
-	defer lf.mu.RUnlock()
+	has := lf.noMutexHasStringLine(s)
+	lf.mu.RUnlock()
 
-	return lf.noMutexHasStringLine(s), nil
+	return has, nil
 }
 
 func (lf *ListFile) noMutexHasStringLine(s string) bool {
 	return lf.tree.Has(Item(s))
 }
 func (lf *ListFile) HasBytesLine(b []byte) (bool, error) {
-	if lf.IsClosed() {
-		return false, errors.New("file is already closed")
-	}
+	//if lf.IsClosed() {
+	//	return false, errors.New("file is already closed")
+	//}
 	// TODO: use a Lock() ar a RLock() ???
 	lf.mu.RLock()
-	defer lf.mu.RUnlock()
+	has := lf.noMutexHasBytesLine(b)
+	lf.mu.RUnlock()
 
-	return lf.noMutexHasBytesLine(b), nil
+	return has, nil
 }
 func (lf *ListFile) noMutexHasBytesLine(b []byte) bool {
 	return lf.noMutexHasStringLine(string(b))
@@ -184,10 +186,11 @@ func (lf *ListFile) noMutexHasBytesLine(b []byte) bool {
 
 func (lf *ListFile) IsClosed() bool {
 	lf.mu.RLock()
-	defer lf.mu.RUnlock()
+	isClosed := lf.isClosed
+	lf.mu.RUnlock()
 	// if the file is already closed, any operation on it
 	// will panic.
-	return lf.isClosed
+	return isClosed
 }
 
 // Len returns the length in bytes of the file;
