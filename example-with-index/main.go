@@ -43,7 +43,7 @@ func main() {
 			panic(err)
 		}
 		// WARNING: FreeOSMemory() (i.e. forced garbage collection) takes a REALLY long time
-		rtdebug.FreeOSMemory()
+		//rtdebug.FreeOSMemory()
 		return true
 	})
 	fmt.Println("took to iterate over all object and parse them:", time.Now().Sub(start))

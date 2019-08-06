@@ -243,17 +243,17 @@ func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
 func (lf *ListFile) IterateLinesAsBytes(iterator func(line []byte) bool) error {
 	return lf.iterateLines(bytesScanner(iterator))
 }
-func textScanner(iterator func(line string) bool) func(scanner *bufio.Scanner) bool {
-	return func(scanner *bufio.Scanner) bool {
-		return iterator(scanner.Text())
+func textScanner(iterator func(line string) bool) func([]byte) bool {
+	return func(b []byte) bool {
+		return iterator(string(b))
 	}
 }
-func bytesScanner(iterator func(line []byte) bool) func(scanner *bufio.Scanner) bool {
-	return func(scanner *bufio.Scanner) bool {
-		return iterator(scanner.Bytes())
+func bytesScanner(iterator func(line []byte) bool) func([]byte) bool {
+	return func(b []byte) bool {
+		return iterator(b)
 	}
 }
-func (lf *ListFile) iterateLines(iterator func(scanner *bufio.Scanner) bool) error {
+func (lf *ListFile) iterateLines(iterator func([]byte) bool) error {
 	if lf.IsClosed() {
 		return errors.New("file is already closed")
 	}
@@ -265,24 +265,41 @@ func (lf *ListFile) iterateLines(iterator func(scanner *bufio.Scanner) bool) err
 	return lf.noMutexIterateLines(iterator)
 }
 
-func (lf *ListFile) noMutexIterateLines(iterator func(scanner *bufio.Scanner) bool) error {
+// readln returns a single line (without the ending \n)
+// from the input buffered reader.
+// An error is returned iff there is an error with the
+// buffered reader.
+func readln(r *bufio.Reader) ([]byte, error) {
+	var (
+		isPrefix bool  = true
+		err      error = nil
+		line, ln []byte
+	)
+	for isPrefix && err == nil {
+		line, isPrefix, err = r.ReadLine()
+		ln = append(ln, line...)
+		//ln = make([]byte, len(line))
+		//copy(ln, line)
+	}
+	return ln, err
+}
+
+func (lf *ListFile) noMutexIterateLines(iterator func(b []byte) bool) error {
 
 	sectionReader := io.NewSectionReader(lf.file, 0, lf.LenInt64())
 
-	scanner := bufio.NewScanner(sectionReader)
-	for scanner.Scan() {
-		doContinue := iterator(scanner)
+	reader := bufio.NewReader(sectionReader)
+	cont, err := readln(reader)
+	for err == nil {
+		doContinue := iterator(cont)
 		if !doContinue {
 			return nil
 		}
-		err := scanner.Err()
-		if err != nil {
-			return fmt.Errorf("error while iterating over scanner: %s", err)
-		}
+		cont, err = readln(reader)
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error of scanner: %s", err)
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("error of reader: %s", err)
 	}
 
 	return nil
