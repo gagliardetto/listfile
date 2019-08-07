@@ -65,7 +65,7 @@ func (lf *ListFile) CreateIndexOnInt(indexName string, intColGetter func(item []
 		lf.indexes[indexName].backfillIndexer = backfillIndexer
 
 		// do the backfill for all current items in the list:
-		lf.noMutexIterateLines(bytesScanner(backfillIndexer))
+		lf.noMutexIterateLines(backfillIndexer)
 	}
 
 	return nil
@@ -228,7 +228,7 @@ func (lf *ListFile) LenLines() int {
 	}
 
 	var count int
-	lf.IterateLines(func(line string) bool {
+	lf.IterateLinesAsBytes(func(line []byte) bool {
 		count++
 		return true
 	})
@@ -241,18 +241,14 @@ func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
 	return lf.iterateLines(textScanner(iterator))
 }
 func (lf *ListFile) IterateLinesAsBytes(iterator func(line []byte) bool) error {
-	return lf.iterateLines(bytesScanner(iterator))
+	return lf.iterateLines(iterator)
 }
 func textScanner(iterator func(line string) bool) func([]byte) bool {
 	return func(b []byte) bool {
 		return iterator(string(b))
 	}
 }
-func bytesScanner(iterator func(line []byte) bool) func([]byte) bool {
-	return func(b []byte) bool {
-		return iterator(b)
-	}
-}
+
 func (lf *ListFile) iterateLines(iterator func([]byte) bool) error {
 	if lf.IsClosed() {
 		return errors.New("file is already closed")
@@ -289,17 +285,18 @@ func (lf *ListFile) noMutexIterateLines(iterator func(b []byte) bool) error {
 	sectionReader := io.NewSectionReader(lf.file, 0, lf.LenInt64())
 
 	reader := bufio.NewReader(sectionReader)
-	cont, err := readln(reader)
-	for err == nil {
-		doContinue := iterator(cont)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err != io.EOF {
+				return fmt.Errorf("error of reader: %s", err)
+			}
+			break
+		}
+		doContinue := iterator(line)
 		if !doContinue {
 			return nil
 		}
-		cont, err = readln(reader)
-	}
-
-	if err != nil && err != io.EOF {
-		return fmt.Errorf("error of reader: %s", err)
 	}
 
 	return nil
