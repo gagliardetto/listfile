@@ -238,15 +238,12 @@ func (lf *ListFile) LenLines() int {
 // IterateLines iterates on the lines of the list;
 // this operation is LOCKING.
 func (lf *ListFile) IterateLines(iterator func(line string) bool) error {
-	return lf.iterateLines(textScanner(iterator))
+	return lf.iterateLines(func(b []byte) bool {
+		return iterator(string(b))
+	})
 }
 func (lf *ListFile) IterateLinesAsBytes(iterator func(line []byte) bool) error {
 	return lf.iterateLines(iterator)
-}
-func textScanner(iterator func(line string) bool) func([]byte) bool {
-	return func(b []byte) bool {
-		return iterator(string(b))
-	}
 }
 
 func (lf *ListFile) iterateLines(iterator func([]byte) bool) error {
@@ -349,8 +346,8 @@ func (lf *ListFile) loadExistingToTree() error {
 		return errors.New("file is already closed")
 	}
 
-	return lf.IterateLines(func(line string) bool {
-		lf.tree.ReplaceOrInsert(Item(line))
+	return lf.IterateLinesAsBytes(func(line []byte) bool {
+		lf.tree.ReplaceOrInsert(Item(string(line)))
 		return true
 	})
 }
