@@ -5,11 +5,106 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gagliardetto/hashsearch"
 	"github.com/gagliardetto/listfile"
+	"github.com/mitchellh/hashstructure"
+	"github.com/petar/GoLLRB/llrb"
+	"github.com/pkg/profile"
 )
 
+type ItemUint64 uint64
+
+func (oid ItemUint64) Less(than llrb.Item) bool {
+	return oid < than.(ItemUint64)
+}
+
+func HasByNumericHash(index *llrb.LLRB, s string) bool {
+	numericHash, err := hashstructure.Hash(s, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	return index.Has(ItemUint64(numericHash))
+}
 func main() {
-	lst, err := listfile.New("./example-with-index.txt")
+	defer profile.Start(profile.MemProfile).Stop()
+	{
+		start := time.Now()
+
+		batchWithoutIndex, err := listfile.NewWithoutIndex("./master-sab3ago2019.out.batch.txt")
+		if err != nil {
+			panic(err)
+		}
+		defer batchWithoutIndex.Close()
+
+		reg := hashsearch.New()
+
+		batchWithoutIndex.IterateLines(func(line string) bool {
+			reg.WarningUnorderedAppend(line)
+			return true
+		})
+		reg.Sort()
+		fmt.Println("took:", time.Since(start))
+
+		start = time.Now()
+
+		fmt.Println(reg.Has("TODO"))
+
+		fmt.Println("took:", time.Since(start))
+
+		time.Sleep(time.Minute)
+	}
+	return
+	{
+		start := time.Now()
+		index := llrb.New()
+
+		batchWithoutIndex, err := listfile.NewWithoutIndex("./master-sab3ago2019.out.batch.txt")
+		if err != nil {
+			panic(err)
+		}
+		defer batchWithoutIndex.Close()
+
+		var hashes []uint64
+
+		batchWithoutIndex.IterateLines(func(line string) bool {
+			numericHash, err := hashstructure.Hash(line, nil)
+			if err != nil {
+				panic(err)
+			}
+			hashes = append(hashes, numericHash)
+			index.InsertNoReplace(ItemUint64(numericHash))
+			return true
+		})
+		fmt.Println("took:", time.Since(start))
+
+		start = time.Now()
+
+		fmt.Println(HasByNumericHash(index, "TODO"))
+
+		fmt.Println("took:", time.Since(start))
+
+		time.Sleep(time.Minute)
+	}
+	return
+
+	{
+		start := time.Now()
+		batch, err := listfile.NewWithRootIndex("./master-sab3ago2019.out.batch.txt")
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("took:", time.Since(start))
+		defer batch.Close()
+
+		start = time.Now()
+		fmt.Println(batch.HasStringLine("TODO"))
+		fmt.Println("took:", time.Since(start))
+		time.Sleep(time.Minute)
+	}
+	return
+
+	lst, err := listfile.NewWithRootIndex("./example-with-index.txt")
 	if err != nil {
 		panic(err)
 	}
@@ -19,7 +114,7 @@ func main() {
 	}
 
 	if true {
-		for iPar := 0; iPar < 500000; iPar++ {
+		for iPar := 0; iPar < 100; iPar++ {
 			o := &Object{
 				ID: iPar,
 			}
@@ -61,26 +156,33 @@ func main() {
 	fmt.Println("took to create index:", time.Now().Sub(start))
 
 	start = time.Now()
-	query := 444
+	query := 44
 	fmt.Println("has", query, lst.HasIntByIndex(indexName, query))
 	fmt.Println("took to ask to index:", time.Now().Sub(start))
 
 	start = time.Now()
-	query = 600000
-	fmt.Println("has", query, lst.HasIntByIndex(indexName, query))
-	fmt.Println("took to ask to index:", time.Now().Sub(start))
-
-	time.Sleep(time.Second * 10)
-
-	start = time.Now()
-	query = 346346
+	query = 60
 	fmt.Println("has", query, lst.HasIntByIndex(indexName, query))
 	fmt.Println("took to ask to index:", time.Now().Sub(start))
 
 	start = time.Now()
-	query = 45363743
+	query = 34
 	fmt.Println("has", query, lst.HasIntByIndex(indexName, query))
 	fmt.Println("took to ask to index:", time.Now().Sub(start))
 
+	start = time.Now()
+	query = 45
+	fmt.Println("has", query, lst.HasIntByIndex(indexName, query))
+	fmt.Println("took to ask to index:", time.Now().Sub(start))
+
+	start = time.Now()
+	query = 102
+	fmt.Println("has", query, lst.HasIntByIndex(indexName, query))
+	fmt.Println("took to ask to index:", time.Now().Sub(start))
+
+	err = lst.Close()
+	if err != nil {
+		panic(err)
+	}
 	time.Sleep(time.Hour)
 }

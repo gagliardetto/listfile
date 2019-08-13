@@ -2,6 +2,7 @@ package listfile
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -15,12 +16,146 @@ type ListFile struct {
 	file     *os.File
 	mu       *sync.RWMutex
 	isClosed bool
-	tree     *llrb.LLRB
+	rootTree *llrb.LLRB
 	indexes  map[string]*Index
 }
 
+// Append appends one or more strings adding a final newline to each.
+func (lf *ListFile) Append(items ...string) error {
+	if lf.IsClosed() {
+		return errors.New("file is already closed")
+	}
+
+	lf.mu.Lock()
+	defer lf.mu.Unlock()
+
+	for _, item := range items {
+		_, err := lf.file.WriteString(item + "\n")
+		if err != nil {
+			return err
+		}
+
+		if lf.rootTree != nil {
+			// add to tree to be able then to search it:
+			lf.rootTree.InsertNoReplace(Item(item))
+			// Using InsertNoReplace because it is "Append", not "UniqueAppend".
+		}
+
+		// add to all indexes:
+		for _, index := range lf.indexes {
+			index.backfillIndexer([]byte(item))
+		}
+	}
+	return nil
+}
+
+// Append appends one or more strings adding a newline to each.
+func (lf *ListFile) AppendBytes(items ...[]byte) error {
+	if lf.IsClosed() {
+		return errors.New("file is already closed")
+	}
+
+	lf.mu.Lock()
+	defer lf.mu.Unlock()
+
+	for _, item := range items {
+		_, err := lf.file.Write(append(item, []byte("\n")...))
+		if err != nil {
+			return err
+		}
+
+		if lf.rootTree != nil {
+			// add to tree to be able then to search it:
+			lf.rootTree.InsertNoReplace(Item(item))
+			// Using InsertNoReplace because it is "Append", not "UniqueAppend".
+		}
+
+		// add to all indexes:
+		for _, index := range lf.indexes {
+			index.backfillIndexer(item)
+		}
+	}
+	return nil
+}
+
+// UniqueAppend appends one or more strings to the list;
+// WARNING: onwly works with listfiles created with NewWithRootIndex
+func (lf *ListFile) UniqueAppend(items ...string) (int, error) {
+	if lf.IsClosed() {
+		return 0, errors.New("file is already closed")
+	}
+
+	if lf.rootTree == nil {
+		return 0, errors.New("listfile was created without root index")
+	}
+
+	lf.mu.Lock()
+	defer lf.mu.Unlock()
+
+	var successfullyAddedItemsCount int
+	for _, item := range items {
+		has := lf.NoMutexHasStringLine(item)
+		if has {
+			continue
+		}
+		_, err := lf.file.WriteString(item + "\n")
+		if err != nil {
+			return successfullyAddedItemsCount, err
+		}
+		// add to rootTree to be able then to search it:
+		lf.rootTree.ReplaceOrInsert(Item(item))
+		successfullyAddedItemsCount++
+
+		// add to all indexes:
+		for _, index := range lf.indexes {
+			index.backfillIndexer([]byte(item))
+		}
+	}
+	return successfullyAddedItemsCount, nil
+}
+
+func (lf *ListFile) HasStringLine(s string) (bool, error) {
+	//if lf.IsClosed() {
+	//	return false, errors.New("file is already closed")
+	//}
+	// TODO: use a Lock() ar a RLock() ???
+
+	if lf.rootTree == nil {
+		return false, errors.New("listfile was created without root index")
+	}
+	lf.mu.RLock()
+	has := lf.NoMutexHasStringLine(s)
+	lf.mu.RUnlock()
+
+	return has, nil
+}
+
+func (lf *ListFile) NoMutexHasStringLine(s string) bool {
+	// WARNING: will panic if listfile was not created with NewWithRootIndex
+	return lf.rootTree.Has(Item(s))
+}
+func (lf *ListFile) HasBytesLine(b []byte) (bool, error) {
+	//if lf.IsClosed() {
+	//	return false, errors.New("file is already closed")
+	//}
+	// TODO: use a Lock() ar a RLock() ???
+
+	if lf.rootTree == nil {
+		return false, errors.New("listfile was created without root index")
+	}
+
+	lf.mu.RLock()
+	has := lf.noMutexHasBytesLine(b)
+	lf.mu.RUnlock()
+
+	return has, nil
+}
+func (lf *ListFile) noMutexHasBytesLine(b []byte) bool {
+	return lf.NoMutexHasStringLine(string(b))
+}
+
 type Index struct {
-	tree            *llrb.LLRB
+	tree            llrb.LLRB
 	backfillIndexer func(line []byte) bool
 }
 
@@ -58,7 +193,7 @@ func (lf *ListFile) CreateIndexOnInt(indexName string, intColGetter func(item []
 
 		// stub index:
 		lf.indexes[indexName] = &Index{
-			tree: llrb.New(),
+			tree: llrb.LLRB{},
 		}
 		// create func that will add items to index during appends:
 		backfillIndexer := newBackfillIndexerInt(lf.indexes[indexName], intColGetter)
@@ -69,119 +204,6 @@ func (lf *ListFile) CreateIndexOnInt(indexName string, intColGetter func(item []
 	}
 
 	return nil
-}
-
-// Append appends one or more strings adding a final newline to each.
-func (lf *ListFile) Append(items ...string) error {
-	if lf.IsClosed() {
-		return errors.New("file is already closed")
-	}
-
-	lf.mu.Lock()
-	defer lf.mu.Unlock()
-
-	for _, item := range items {
-		_, err := lf.file.WriteString(item + "\n")
-		if err != nil {
-			return err
-		}
-		// add to tree to be able then to search it:
-		// TODO: use InsertNoReplace instead?
-		lf.tree.ReplaceOrInsert(Item(item))
-
-		// add to all indexes:
-		for _, index := range lf.indexes {
-			index.backfillIndexer([]byte(item))
-		}
-	}
-	return nil
-}
-
-// Append appends one or more strings adding a newline to each.
-func (lf *ListFile) AppendBytes(items ...[]byte) error {
-	if lf.IsClosed() {
-		return errors.New("file is already closed")
-	}
-
-	lf.mu.Lock()
-	defer lf.mu.Unlock()
-
-	for _, item := range items {
-		_, err := lf.file.Write(append(item, []byte("\n")...))
-		if err != nil {
-			return err
-		}
-		// add to tree to be able then to search it:
-		// TODO: use InsertNoReplace instead?
-		lf.tree.ReplaceOrInsert(Item(item))
-
-		// add to all indexes:
-		for _, index := range lf.indexes {
-			index.backfillIndexer(item)
-		}
-	}
-	return nil
-}
-
-// Append appends one or more strings adding a newline to each.
-func (lf *ListFile) UniqueAppend(items ...string) (int, error) {
-	if lf.IsClosed() {
-		return 0, errors.New("file is already closed")
-	}
-
-	lf.mu.Lock()
-	defer lf.mu.Unlock()
-
-	var successfullyAddedItemsCount int
-	for _, item := range items {
-		has := lf.NoMutexHasStringLine(item)
-		if has {
-			continue
-		}
-		_, err := lf.file.WriteString(item + "\n")
-		if err != nil {
-			return successfullyAddedItemsCount, err
-		}
-		// add to tree to be able then to search it:
-		lf.tree.ReplaceOrInsert(Item(item))
-		successfullyAddedItemsCount++
-
-		// add to all indexes:
-		for _, index := range lf.indexes {
-			index.backfillIndexer([]byte(item))
-		}
-	}
-	return successfullyAddedItemsCount, nil
-}
-
-func (lf *ListFile) HasStringLine(s string) (bool, error) {
-	//if lf.IsClosed() {
-	//	return false, errors.New("file is already closed")
-	//}
-	// TODO: use a Lock() ar a RLock() ???
-	lf.mu.RLock()
-	has := lf.NoMutexHasStringLine(s)
-	lf.mu.RUnlock()
-
-	return has, nil
-}
-
-func (lf *ListFile) NoMutexHasStringLine(s string) bool {
-	return lf.tree.Has(Item(s))
-}
-func (lf *ListFile) HasBytesLine(b []byte) (bool, error) {
-	//if lf.IsClosed() {
-	//	return false, errors.New("file is already closed")
-	//}
-	// TODO: use a Lock() ar a RLock() ???
-	lf.mu.RLock()
-	has := lf.noMutexHasBytesLine(b)
-	lf.mu.RUnlock()
-
-	return has, nil
-}
-func (lf *ListFile) noMutexHasBytesLine(b []byte) bool {
-	return lf.NoMutexHasStringLine(string(b))
 }
 
 func (lf *ListFile) IsClosed() bool {
@@ -290,6 +312,8 @@ func (lf *ListFile) noMutexIterateLines(iterator func(b []byte) bool) error {
 			}
 			break
 		}
+		// remove final newspace:
+		line = bytes.TrimSuffix(line, []byte("\n"))
 		doContinue := iterator(line)
 		if !doContinue {
 			return nil
@@ -316,12 +340,21 @@ func (lf *ListFile) Close() error {
 		return err
 	}
 
+	// destroy all indexes:
+	for i := range lf.indexes {
+		lf.indexes[i] = nil
+	}
+	lf.indexes = nil
+	// delete root tree (if any):
+	lf.rootTree = nil
+
+	// mark as closed:
 	lf.isClosed = true
 
 	return nil
 }
 
-func New(filepath string) (*ListFile, error) {
+func NewWithoutIndex(filepath string) (*ListFile, error) {
 	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("error while OpenFile: %s", err)
@@ -330,24 +363,40 @@ func New(filepath string) (*ListFile, error) {
 	lf := &ListFile{
 		file:    file,
 		mu:      &sync.RWMutex{},
-		tree:    llrb.New(),
 		indexes: make(map[string]*Index),
-	}
-
-	err = lf.loadExistingToTree()
-	if err != nil {
-		return nil, fmt.Errorf("error while loadExistingToTree: %s", err)
 	}
 
 	return lf, nil
 }
-func (lf *ListFile) loadExistingToTree() error {
+
+func NewWithRootIndex(filepath string) (*ListFile, error) {
+	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("error while OpenFile: %s", err)
+	}
+
+	lf := &ListFile{
+		file:     file,
+		mu:       &sync.RWMutex{},
+		rootTree: llrb.New(),
+		indexes:  make(map[string]*Index),
+	}
+
+	err = lf.loadExistingToRootTree()
+	if err != nil {
+		return nil, fmt.Errorf("error while loadExistingToRootTree: %s", err)
+	}
+
+	return lf, nil
+}
+
+func (lf *ListFile) loadExistingToRootTree() error {
 	if lf.IsClosed() {
 		return errors.New("file is already closed")
 	}
 
-	return lf.IterateLinesAsBytes(func(line []byte) bool {
-		lf.tree.ReplaceOrInsert(Item(string(line)))
+	return lf.IterateLines(func(line string) bool {
+		lf.rootTree.ReplaceOrInsert(Item(line))
 		return true
 	})
 }
