@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/gagliardetto/hashsearch"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -16,7 +17,7 @@ type ListFile struct {
 	file     *os.File
 	mu       *sync.RWMutex
 	isClosed bool
-	rootTree *llrb.LLRB
+	rootTree *hashsearch.HashSearch
 	indexes  map[string]*Index
 }
 
@@ -37,8 +38,7 @@ func (lf *ListFile) Append(items ...string) error {
 
 		if lf.rootTree != nil {
 			// add to tree to be able then to search it:
-			lf.rootTree.InsertNoReplace(Item(item))
-			// Using InsertNoReplace because it is "Append", not "UniqueAppend".
+			lf.rootTree.OrderedAppend(item)
 		}
 
 		// add to all indexes:
@@ -66,8 +66,7 @@ func (lf *ListFile) AppendBytes(items ...[]byte) error {
 
 		if lf.rootTree != nil {
 			// add to tree to be able then to search it:
-			lf.rootTree.InsertNoReplace(Item(item))
-			// Using InsertNoReplace because it is "Append", not "UniqueAppend".
+			lf.rootTree.OrderedAppendBytes(item)
 		}
 
 		// add to all indexes:
@@ -103,7 +102,7 @@ func (lf *ListFile) UniqueAppend(items ...string) (int, error) {
 			return successfullyAddedItemsCount, err
 		}
 		// add to rootTree to be able then to search it:
-		lf.rootTree.ReplaceOrInsert(Item(item))
+		lf.rootTree.OrderedAppend(item)
 		successfullyAddedItemsCount++
 
 		// add to all indexes:
@@ -132,7 +131,7 @@ func (lf *ListFile) HasStringLine(s string) (bool, error) {
 
 func (lf *ListFile) NoMutexHasStringLine(s string) bool {
 	// WARNING: will panic if listfile was not created with NewWithRootIndex
-	return lf.rootTree.Has(Item(s))
+	return lf.rootTree.Has(s)
 }
 func (lf *ListFile) HasBytesLine(b []byte) (bool, error) {
 	//if lf.IsClosed() {
@@ -155,7 +154,7 @@ func (lf *ListFile) noMutexHasBytesLine(b []byte) bool {
 }
 
 type Index struct {
-	tree            llrb.LLRB
+	tree            *hashsearch.IntArr
 	backfillIndexer func(line []byte) bool
 }
 
@@ -168,13 +167,13 @@ func (lf *ListFile) HasIntByIndex(indexName string, v int) bool {
 		// TODO: if the index does not exist, return error, or create it, or just return false?
 		return false
 	}
-	return index.tree.Has(ItemInt(v))
+	return index.tree.Has(v)
 }
 
 func newBackfillIndexerInt(index *Index, intColGetter func(item []byte) int) func(line []byte) bool {
 	return func(line []byte) bool {
 		colVal := intColGetter(line)
-		index.tree.ReplaceOrInsert(ItemInt(colVal))
+		index.tree.OrderedAppend(colVal)
 		return true
 	}
 }
@@ -193,7 +192,7 @@ func (lf *ListFile) CreateIndexOnInt(indexName string, intColGetter func(item []
 
 		// stub index:
 		lf.indexes[indexName] = &Index{
-			tree: llrb.LLRB{},
+			tree: hashsearch.NewIntArr(),
 		}
 		// create func that will add items to index during appends:
 		backfillIndexer := newBackfillIndexerInt(lf.indexes[indexName], intColGetter)
@@ -378,7 +377,7 @@ func NewWithRootIndex(filepath string) (*ListFile, error) {
 	lf := &ListFile{
 		file:     file,
 		mu:       &sync.RWMutex{},
-		rootTree: llrb.New(),
+		rootTree: hashsearch.New(),
 		indexes:  make(map[string]*Index),
 	}
 
@@ -395,8 +394,14 @@ func (lf *ListFile) loadExistingToRootTree() error {
 		return errors.New("file is already closed")
 	}
 
-	return lf.IterateLines(func(line string) bool {
-		lf.rootTree.ReplaceOrInsert(Item(line))
+	lf.mu.Lock()
+	defer func() {
+		lf.rootTree.Sort()
+		lf.mu.Unlock()
+	}()
+
+	return lf.noMutexIterateLines(func(line []byte) bool {
+		lf.rootTree.WarningUnorderedAppendBytes(line)
 		return true
 	})
 }
