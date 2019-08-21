@@ -249,7 +249,10 @@ func (lf *ListFile) LenLines() int {
 	}
 
 	var count int
-	lf.IterateLinesAsBytes(func(line []byte) bool {
+	lf.IterateLinesAsBytes(func(_ []byte) bool {
+		// TODO: does setting line to nil somehow break things?
+		// Does it help with garbage collection?
+
 		count++
 		return true
 	})
