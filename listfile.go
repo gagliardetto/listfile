@@ -214,11 +214,11 @@ func (lf *ListFile) IsClosed() bool {
 	return isClosed
 }
 
-// Len returns the length in bytes of the file;
+// Size returns the size in bytes of the file;
 // WARNING: this operation does not lock the mutex.
-func (lf *ListFile) Len() int {
+func (lf *ListFile) Size() int {
 	// NOTE: here we don't use IsClosed() because
-	// it uses the mutex; Len() is used in noMutexIterateLines
+	// it uses the mutex; Size() is used in noMutexIterateLines
 	// which is called after another mutex is locked,
 	// making IsClosed() wait forever for the mutex unlock.
 	if lf.isClosed {
@@ -239,11 +239,11 @@ func (lf *ListFile) Len() int {
 
 	return int(info.Size())
 }
-func (lf *ListFile) LenInt64() int64 {
-	return int64(lf.Len())
+func (lf *ListFile) SizeInt64() int64 {
+	return int64(lf.Size())
 }
 
-func (lf *ListFile) LenLines() int {
+func (lf *ListFile) Lines() int {
 	if lf.IsClosed() {
 		return 0
 	}
@@ -303,7 +303,7 @@ func readln(r *bufio.Reader) ([]byte, error) {
 
 func (lf *ListFile) noMutexIterateLines(iterator func(b []byte) bool) error {
 
-	sectionReader := io.NewSectionReader(lf.file, 0, lf.LenInt64())
+	sectionReader := io.NewSectionReader(lf.file, 0, lf.SizeInt64())
 
 	reader := bufio.NewReader(sectionReader)
 	for {
